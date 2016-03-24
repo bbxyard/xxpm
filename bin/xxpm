@@ -57,7 +57,7 @@ function sub_verify_tarball()
     verify_dir "$XXPM_D_DOWNLOAD"
     local_src_tarball="$XXPM_D_DOWNLOAD/$2"
     if [ ! -f "$local_src_tarball" ]; then
-        wget "$1" -F "$local_src_tarball"
+        wget "$1" -O "$local_src_tarball"
     fi
     # untar with each tools(bunzip2 or gunzip)
     if [ -f "$local_src_tarball" ]; then
