@@ -1,0 +1,154 @@
+#!/bin/bash
+# xx package manger
+#
+
+F_SRC_CONF="src.conf"
+PROJ_ROOT_HOME=$(pushd `dirname $0` >/dev/null; pwd; popd >/dev/null);
+
+XXPM_HOME=$(pushd "$PROJ_ROOT_HOME/../" >/dev/null; pwd; popd >/dev/null);
+XXPM_D_VBOX="$XXPM_HOME/vbox"
+XXPM_D_OPT="$XXPM_HOME/opt"
+XXPM_D_BIN="$XXPM_HOME/bin"
+XXPM_F_ENV="$XXPM_HOME/xxpm.env"
+XXPM_F_CONF="$XXPM_HOME/bin/src.conf"
+XXPM_D_CONF="$XXPM_HOME/bin/src.conf.d"
+XXPM_D_BUILD="$XXPM_HOME/.var/build"
+XXPM_D_DOWNLOAD="$XXPM_HOME/.var/download"
+XXPM_D_GIT="$XXPM_HOME/.var/git"
+
+
+# *************************************************************
+# 通用函数
+# *************************************************************
+# tarball(tar.gz, tar.bz2)
+# git
+function get_src_type()
+{
+    stype=""
+    bname=$(basename "$1")
+    echo $bname | grep ".tar.gz$"  &>/dev/null && stype=".tar.gz"
+    echo $bname | grep ".tar.bz2$" &>/dev/null && stype=".tar.bz2"
+    echo $bname | grep ".git$"     &>/dev/null && stype=".git"
+    [ -n "$stype" ] && {
+        echo $stype; return 0
+    } || {
+        return -1
+    }
+}
+
+function verify_dir()
+{
+    if [ ! -d "$1" ]; then
+        mkdir -p "$1"
+    fi
+}
+
+function sub_verify_tarball()
+{
+    verify_dir "$XXPM_D_DOWNLOAD"
+    local_src_tarball="$XXPM_D_DOWNLOAD/$2"
+    if [ ! -f "$local_src_tarball" ]; then
+        wget "$1" -F "$local_src_tarball"
+    fi
+}
+
+function sub_verify_git()
+{
+    verify_dir "$XXPM_D_GIT"
+    local_src_git_dir="$XXPM_D_GIT/$2"
+    if [ ! -d "$local_src_git_dir" ]; then
+        git clone "$1" "$local_src_git_dir"
+    else
+        echo "update PASS"
+    fi
+}
+
+function verify_src()
+{
+    uri="$1"
+    bname=$(basename "$uri")
+    ename=$(get_src_type "$bname")
+    if [ -z "$ename" ]; then
+        echo "EMPTY src type and basename=${ename}"
+        return -2
+    fi
+    prj_name=$(echo $bname | sed "s:$ename::g")
+    echo "prj_name=$prj_name"
+    case "$ename" in
+        ".tar.gz"|".tar.bz2") sub_verify_tarball "$uri" "$bname" ;;
+        ".git") sub_verify_git "$uri" "$prj_name" ;;
+        *)
+            echo "NOT support the src type=${ename}"
+            return -1
+            ;;
+    esac
+    return 0
+}
+
+# readall conf files
+function cat_all_conf()
+{
+    cat $XXPM_D_CONF/*.conf 2>/dev/null "$XXPM_F_CONF"
+}
+
+function eval_pack_env()
+{
+    eval $(cat_all_conf | sed -n "/^\[$1\]\$/,/^[ \t]*\$/p" | sed 1d)
+    echo "URI=$URI"
+    echo "PREFIX=$PREFIX"
+}
+
+
+## build special
+function build_redis()
+{
+    wget "$URI_REDIS"
+    tarball=$(basename "$URI_REDIS")
+    fname=$(basename "$URI_REDIS" | sed "s:.tar.gz$::g")
+    tmpdir=/tmp/$$/
+    mkdir -p $tmpdir
+    tar -zxvf $tarball -C $tmpdir
+    tmpdir1=$tmpdir/$fname
+    if [ -d "$tmpdir1" ]; then
+        pushd "$tmpdir1"
+        make PREFIX=$SDK_HOME install
+        make -C deps/hiredis PREFIX=$SDK_HOME install
+        popd
+    fi
+}
+
+# ***********************************************
+# sub command area
+# ***********************************************
+function download()
+{
+    product_name="$1"
+    eval_pack_env "$product_name"
+    verify_src "$URI"
+}
+
+# build sth
+function install()
+{
+    product_name="$1"
+    eval_pack_env "$product_name"
+    verify_src "$URI"
+}
+
+
+#build redis
+#build googletest
+RETVAL=0
+CMD="$1"
+shift
+case "$CMD" in
+    download)   download "$1";;
+    install)    install  "$1";;
+    list)       echo "list" ;;
+    uninstall)  echo "uninstall" ;;
+    *)
+        echo "not support command $CMD"
+        RETVAL=-1
+        ;;
+esac
+exit $RETVAL
