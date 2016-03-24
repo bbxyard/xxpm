@@ -2,10 +2,11 @@
 # xx package manger
 #
 
-F_SRC_CONF="src.conf"
-PROJ_ROOT_HOME=$(pushd `dirname $0` >/dev/null; pwd; popd >/dev/null);
+# change dir to xxmp-home
+THIS_ROOT_HOME=$(pushd `dirname $0` >/dev/null; pwd; popd >/dev/null);
+XXPM_HOME=$(pushd "$THIS_ROOT_HOME/../" >/dev/null; pwd; popd >/dev/null);
+pushd "$XXPM_HOME"
 
-XXPM_HOME=$(pushd "$PROJ_ROOT_HOME/../" >/dev/null; pwd; popd >/dev/null);
 XXPM_D_VBOX="$XXPM_HOME/vbox"
 XXPM_D_OPT="$XXPM_HOME/opt"
 XXPM_D_BIN="$XXPM_HOME/bin"
@@ -21,6 +22,8 @@ XXPM_D_INSTALL=$XXPM_D_OPT
 # runtime src-dir build-dir
 RT_D_SRC=
 RT_D_BUILD=
+
+PROJECT=
 
 
 # *************************************************************
@@ -101,10 +104,31 @@ function verify_src()
             return -1
             ;;
     esac
-    RT_D_BUILD=$RT_D_SRC/$BUILD_DIR
-    echo "RT_D_SRC=$RT_D_SRC"
-    echo "RT_D_BUILD=$RT_D_BUILD"
+
+    # 决策编译路径
+    if [ -n "$BUILD_IN_SRC" ]; then
+        RT_D_BUILD="$RT_D_SRC"
+    else
+        RT_D_BUILD="$XXPM_D_BUILD/$PROJECT-build"
+    fi
+    echo "--RT_D_SRC=$RT_D_SRC"
+    echo "--RT_D_BUILD=$RT_D_BUILD"
     return 0
+}
+
+#
+function verify_build_cmd()
+{
+    [ -n "$BUILD_CMD" ] && return 0;
+
+    DEF_MAKE_BUILD_CMD="make"
+    DEF_CMAKE_BUILD_CMD="cmake $RT_D_SRC -DCMAKE_INSTALL_PREFIX=$INSTALL_DIR && make VERBOSE=1 install"
+    DEF_CONFIGURE_BUILD_CMD="$RT_D_SRC/configure --prefix=$INSTALL_DIR"
+
+    [ -f "$RT_D_SRC/Makefile" ]       && BUILD_CMD="$DEF_MAKE_BUILD_CMD" && return 0;
+    [ -f "$RT_D_SRC/CMakeLists.txt" ] && BUILD_CMD="$DEF_CMAKE_BUILD_CMD" && return 0;
+    [ -f "$RT_D_SRC/configure" ]      && BUILD_CMD="$DEF_CONFIGURE_BUILD_CMD" && return 0;
+    return 1;
 }
 
 # readall conf files
@@ -112,26 +136,42 @@ function cat_all_conf()
 {
     cat $XXPM_D_CONF/*.conf 2>/dev/null "$XXPM_F_CONF"
 }
+function load_conf()
+{
+    eval $(cat_all_conf | sed -n "/^\[$1\]\$/,/^[ \t]*\$/p" | sed 1d)
+}
 
 function eval_pack_env()
 {
-    eval $(cat_all_conf | sed -n "/^\[$1\]\$/,/^[ \t]*\$/p" | sed 1d)
-    echo "URI=$URI"
-    echo "BUILD_CMD=$BUILD_CMD; BUILD_DIR=$BUILD_DIR"
+    # 擦除避免污染
+    unset PROJECT
+    unset URI
+    unset BUILD_CMD
+    unset BUILD_IN_SRC
+    unset INSTALL_DIR
+
+    # 读取配置文件-1
+    PROJECT=$1
+    load_conf $1
+
+    # 查漏补缺
+    if [ -n "$INSTALL_DIR_NAME" ]; then
+        INSTALL_DIR="$XXPM_D_OPT/$INSTALL_DIR_NAME"
+    else
+        INSTALL_DIR="$XXPM_D_OPT/$PROJECT"
+    fi;
+    # 重读一次配置文件，解决循环依赖
+    load_conf $1
+
+    # 调试
+    echo "--PROJECT=$PROJECT"
+    echo "--URI=$URI"
+    echo "--INSTALL_DIR=$INSTALL_DIR"
+    echo "--BUILD_IN_SRC=$BUILD_IN_SRC"
+    echo "--BUILD_CMD=$BUILD_CMD"
 }
 
-
-## build special
-function build_redis()
-{
-    if [ -d "$tmpdir1" ]; then
-        pushd "$tmpdir1"
-        make PREFIX=$SDK_HOME install
-        make -C deps/hiredis PREFIX=$SDK_HOME install
-        popd
-    fi
-}
-
+# map opt --> vbox
 function map_dir()
 {
     installed_home="$1"
@@ -140,7 +180,7 @@ function map_dir()
     for x in $sub_dirs; do
         lnk_dir="$XXPM_D_VBOX/$x"
         verify_dir "$lnk_dir"
-        pushd "$lnk_dir"
+        pushd "$lnk_dir" >/dev/null
             lnk_from_dir=../../$(basename "$XXPM_D_OPT")/$installed_home_name/$x
             case "$x" in
                 bin)
@@ -156,7 +196,7 @@ function map_dir()
                     echo "$lnk_dir PASS"
                     ;;
             esac
-        popd
+        popd >/dev/null
     done
 }
 
@@ -165,30 +205,29 @@ function map_dir()
 # ***********************************************
 function download()
 {
-    product_name="$1"
-    eval_pack_env "$product_name"
+    eval_pack_env "$1"
     verify_src "$URI"
 }
 
 # build sth
 function install()
 {
-    product_name="$1"
-    eval_pack_env "$product_name"
-    verify_src "$URI"
+    download "$1"
     verify_dir "$RT_D_BUILD"
     if [ -d "$RT_D_BUILD" ]; then
-        pushd "$RT_D_BUILD"
+        pushd "$RT_D_BUILD" >/dev/null
+            verify_build_cmd
             eval "$BUILD_CMD"
-        popd
+        popd >/dev/null
     fi
     # deploy symbol-link
     map_dir "$INSTALL_DIR"
 }
 
 
-#build redis
-#build googletest
+# ***********************************************
+# main
+# ***********************************************
 RETVAL=0
 CMD="$1"
 shift
